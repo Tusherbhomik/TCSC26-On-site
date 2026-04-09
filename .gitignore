@@ -1,0 +1,40 @@
+### Data files ###
+Submission/data/*.db
+Submission/data/*.csv
+Submission/data/*.json
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+### Jupyter Notebook ###
+.ipynb_checkpoints/
+# Optional: ignore notebooks (remove if you want to keep them)
+# *.ipynb
+
+### System files ###
+.DS_Store
+Thumbs.db
+
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+build/
+bin/
+
+### .NET ###
+bin/
+obj/
