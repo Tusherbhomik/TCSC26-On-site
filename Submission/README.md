@@ -1,8 +1,8 @@
 # arXiv Paper Analysis — Submission
 
-A data pipeline that ingests a sampled arXiv metadata dataset, builds a
-structured SQLite database, applies SQL quality checks, and generates
-four publication-ready visualisations.
+A full data product over a sampled arXiv metadata dataset: ingestion pipeline,
+SQL quality checks, visualisations, a RAG API server, and a benchmark answer
+runner using semantic retrieval + LLM generation.
 
 ---
 
@@ -10,22 +10,26 @@ four publication-ready visualisations.
 
 ```
 Submission/
-├── ingest.py          # Step 1 — load, filter, build all DB tables
-├── clean.sql          # Step 2 — SQL quality checks & cleaning
-├── visualize.py       # Step 3 — generate all four plots
-├── rag_pipeline.py    # RAG pipeline (retrieval-augmented generation)
-├── server.py          # API server
-├── query_runner.py    # Interactive query runner
-├── ingest.ipynb       # Cell-by-cell verification notebook (mirrors ingest.py)
+├── ingest.py           # Step 1 — load, filter, build all DB tables
+├── clean.sql           # Step 2 — SQL quality checks & cleaning
+├── visualize.py        # Step 3 — generate all four plots
+├── rag_pipeline.py     # Step 4 — embed abstracts, build ChromaDB vector store, retrieve()
+├── server.py           # Step 5 — FastAPI RAG server (4 endpoints)
+├── query_runner.py     # Step 6 — benchmark answer generation → answers.json
+├── ingest.ipynb        # Cell-by-cell verification notebook (mirrors ingest.py)
+├── answers.json        # Generated answers for all 22 benchmark questions
 ├── data/
-│   ├── kaggle_arxiv.csv   # Source dataset (100,000 rows)
-│   ├── papers_raw.json    # Exported raw records (JSON)
-│   └── arxiv.db           # SQLite database (all tables)
-└── plots/
-    ├── 01_papers_per_category.png
-    ├── 02_submission_trend_over_time.png
-    ├── 03_publication_status_breakdown.png
-    └── 04_abstract_length_distribution.png
+│   ├── kaggle_arxiv.csv    # Source dataset (100,000 rows) — gitignored
+│   ├── papers_raw.json     # Exported raw records (JSON) — gitignored
+│   └── arxiv.db            # SQLite database (all tables) — gitignored
+├── vector_store/           # ChromaDB persistent store — gitignored (rebuild with rag_pipeline.py)
+├── plots/
+│   ├── 01_papers_per_category.png
+│   ├── 02_submission_trend_over_time.png
+│   ├── 03_publication_status_breakdown.png
+│   └── 04_abstract_length_distribution.png
+└── Test/
+    └── questions.json      # 22 benchmark questions with grading criteria
 ```
 
 ---
@@ -33,10 +37,19 @@ Submission/
 ## Requirements
 
 ```bash
-pip install pandas matplotlib numpy
+pip install pandas matplotlib numpy httpx chromadb python-dotenv fastapi uvicorn pydantic
 ```
 
 SQLite3 is part of the Python standard library — no extra install needed.
+
+Create a `.env` file in the **project root** (one level above `Submission/`):
+
+```
+OPENROUTER=sk-or-v1-...
+```
+
+The OpenRouter key is used for both embeddings (`sentence-transformers/all-minilm-l6-v2`)
+and LLM generation (`google/gemini-3.1-flash-lite-preview`).
 
 ---
 
@@ -47,6 +60,8 @@ All commands must be run from inside the `Submission/` directory:
 ```bash
 cd Submission/
 ```
+
+---
 
 ### Step 1 — Ingest & build the database
 
@@ -78,9 +93,7 @@ python ingest.py
 Saved 100,000 rows to table 'raw_papers'
 Saved 100,000 rows to table 'papers'
 Saved 5 rows to table 'category_stats'
-Saved N rows to table 'yearly_trends'
-Saved 10 rows to table 'publication_status'
-Saved M rows to table 'author_stats'
+...
 Ingestion complete.
 ```
 
@@ -104,7 +117,7 @@ sqlite3 data/arxiv.db < clean.sql
 4. Prints a final assertion report — every row must show `✓ PASS` with
    `violations = 0`.
 
-**Expected output (assertion report):**
+**Expected assertion report:**
 
 ```
 check_name                          violations  status
@@ -128,6 +141,111 @@ python visualize.py
 ```
 
 Reads directly from `data/arxiv.db` and saves four PNG files to `plots/`.
+
+---
+
+### Step 4 — Build the vector store
+
+```bash
+python rag_pipeline.py
+```
+
+**What it does:**
+
+1. Loads all papers with non-empty abstracts from `data/arxiv.db`.
+2. Chunks each abstract into 200-word windows with 40-word overlap.
+3. Embeds chunks in batches of 64 via OpenRouter
+   (`sentence-transformers/all-minilm-l6-v2`, 384-dim vectors).
+4. Upserts into a ChromaDB persistent collection (`arxiv_papers`) stored in
+   `vector_store/` using cosine similarity.
+5. **Resume-capable** — skips chunks already stored, so interrupted builds
+   can be safely restarted.
+
+This step can take a while for the full dataset. The server and query runner
+will work with a partial build.
+
+---
+
+### Step 5 — Start the API server
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The server auto-builds the vector store on startup if needed (resume mode).
+
+**Endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check — returns model name |
+| `GET` | `/stats` | DB summary: total papers, year range, counts by category |
+| `POST` | `/retrieve` | Semantic retrieval — returns ranked chunks, no LLM |
+| `POST` | `/query` | Full RAG: retrieve + LLM answer generation |
+
+**Example `/query` request:**
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What regularization methods reduce overfitting?", "n_results": 5}'
+```
+
+Optional filters:
+
+```json
+{
+  "question": "...",
+  "category_filter": "cs.LG",
+  "year_filter": 2022,
+  "n_results": 5
+}
+```
+
+---
+
+### Step 6 — Generate benchmark answers
+
+```bash
+python query_runner.py
+```
+
+Reads `Test/questions.json` (22 benchmark questions), runs the full RAG
+pipeline for each (semantic retrieval from ChromaDB + LLM via OpenRouter),
+and writes results to `answers.json`.
+
+**LLM:** `google/gemini-3.1-flash-lite-preview` via OpenRouter  
+**Retrieval:** ChromaDB cosine similarity (`rag_pipeline.retrieve`)
+
+Each entry in `answers.json`:
+
+```json
+{
+  "question_id": "1",
+  "question": "...",
+  "answer": "...",
+  "sources": [
+    {
+      "arxiv_id": "...",
+      "title": "...",
+      "category": "cs.LG",
+      "year": 2022,
+      "pub_status": "Published",
+      "first_author": "...",
+      "distance": 0.123
+    }
+  ],
+  "model_used": "google/gemini-3.1-flash-lite-preview",
+  "category_filter": "cs.LG",
+  "year_filter": null
+}
+```
+
+Override defaults with flags:
+
+```bash
+python query_runner.py --questions Test/questions.json --out answers.json
+```
 
 ---
 
@@ -210,7 +328,6 @@ Reads directly from `data/arxiv.db` and saves four PNG files to `plots/`.
 - Top panel: multi-line time series (one line per category, year on x-axis)
 - Peak year annotated on each line
 - Bottom panel: year-over-year % growth bar chart (green = growth, red = decline)
-- Note: based on sampled subset — relative trends are meaningful, absolute counts are not
 
 ### 03 — Publication Status Breakdown
 **File:** `plots/03_publication_status_breakdown.png`
@@ -223,34 +340,32 @@ Reads directly from `data/arxiv.db` and saves four PNG files to `plots/`.
 **File:** `plots/04_abstract_length_distribution.png`
 - Top panel: horizontal box plots for all categories (IQR, whiskers, outlier dots)
 - Bottom row: individual histogram per category with median and mean lines
-- Unusually short (< 30 words) and very long abstracts flagged per category
 
 ---
 
-## Verification Notebook
+## RAG Pipeline Architecture
 
-`ingest.ipynb` mirrors `ingest.py` cell-by-cell for interactive inspection.
-Run it in Jupyter to verify each step before executing the full pipeline:
-
-```bash
-jupyter notebook ingest.ipynb
 ```
-
-Cells are ordered as:
-1. Imports & paths
-2. Load raw CSV
-3. Filter supported categories
-4. Build `raw_papers`
-5. Null / quality check
-6. Export → `papers_raw.json`
-7. Export → `arxiv.db` (raw_papers) + verify
-8. Build `papers`
-9. Quality check — papers
-10. Export → `arxiv.db` (papers) + verify
-11. Build `category_stats` → export → verify
-12. Build `yearly_trends` → export → verify
-13. Build `publication_status` → export → verify
-14. Build `author_stats` → export → verify
+kaggle_arxiv.csv
+      │
+      ▼
+  ingest.py ──────────────► arxiv.db (SQLite, 6 tables)
+                                  │
+                                  ▼
+                          rag_pipeline.py
+                          ├── chunk abstracts (200 words / 40 overlap)
+                          ├── embed via OpenRouter (all-minilm-l6-v2)
+                          └── upsert → vector_store/ (ChromaDB)
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+              server.py                  query_runner.py
+           (FastAPI REST API)          (batch answer generation)
+           POST /query                  reads Test/questions.json
+           POST /retrieve               writes answers.json
+           GET  /stats
+           GET  /health
+```
 
 ---
 
@@ -264,9 +379,6 @@ Cells are ordered as:
 | `stat.ML` | Statistical Machine Learning |
 | `cs.CV` | Computer Vision |
 
-A paper is included if its `categories` field contains **at least one**
-of the above (papers can belong to multiple categories).
-
 ---
 
 ## Derived Field Logic
@@ -278,5 +390,15 @@ of the above (papers can belong to multiple categories).
 | `author_count` | Count of comma-separated tokens in `authors` |
 | `first_author` | First comma-separated token in `authors` |
 | `submitted_year` | `.year` from parsed `submitted` datetime |
-| `subject_area` | Prefix map: `cs.*` → Computer Science, `stat.*` → Statistics, etc. |
+| `subject_area` | Prefix map: `cs.*` → Computer Science, `stat.*` → Statistics |
 | `pub_status` | `Published` if `doi` or `journal_ref` is non-null/non-empty, else `Preprint` |
+
+---
+
+## Verification Notebook
+
+`ingest.ipynb` mirrors `ingest.py` cell-by-cell for interactive inspection:
+
+```bash
+jupyter notebook ingest.ipynb
+```
