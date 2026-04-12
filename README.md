@@ -1,8 +1,88 @@
-# arXiv Paper Analysis
+<p align="center">
+  <h1 align="center">arXiv Paper Analysis</h1>
+  <p align="center">
+    A full data product over 100k arXiv papers — ingestion, SQL cleaning, visualisations,<br/>
+    semantic RAG retrieval, FastAPI server, and LLM-powered benchmark answers.
+  </p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+    <img src="https://img.shields.io/badge/SQLite-arxiv.db-003B57?style=for-the-badge&logo=sqlite&logoColor=white"/>
+    <img src="https://img.shields.io/badge/ChromaDB-vector store-FF6B6B?style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/FastAPI-server-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+    <img src="https://img.shields.io/badge/OpenRouter-embeddings + LLM-6C5CE7?style=for-the-badge"/>
+  </p>
+</p>
 
-A full data product over a sampled arXiv metadata dataset: ingestion pipeline,
-SQL quality checks, visualisations, a RAG API server, and a benchmark answer
-runner using semantic retrieval + LLM generation.
+---
+
+## Data Traversal Flow
+
+```mermaid
+flowchart TD
+    CSV["📄 kaggle_arxiv.csv\n100,000 rows"]
+
+    subgraph STEP1["Step 1 — Ingest"]
+        INGEST["⚙️ ingest.py"]
+    end
+
+    subgraph STEP2["Step 2 — Clean"]
+        CLEANSQL["🧹 clean.sql"]
+    end
+
+    subgraph STEP3["Step 3 — Visualise"]
+        VIZ["📊 visualize.py"]
+    end
+
+    subgraph STEP4["Step 4 — Embed"]
+        RAG["🔗 rag_pipeline.py\nbatch=256 · OpenRouter API"]
+    end
+
+    subgraph STEP5["Step 5 — Serve"]
+        SERVER["🚀 server.py\nFastAPI · 4 endpoints"]
+    end
+
+    subgraph STEP6["Step 6 — Answer"]
+        QR["🤖 query_runner.py\nGemini 3.1 Flash Lite"]
+    end
+
+    DB[("🗄️ data/arxiv.db\n6 tables · ~100k rows")]
+    JSON["📦 papers_raw.json"]
+    VS[("🧠 vector_store/\nChromaDB · ~70k chunks")]
+    PLOTS["🖼️ plots/\n4 PNG charts"]
+    QS["📋 Test/questions.json\n22 benchmark questions"]
+    ANS["✅ answers.json\n22 grounded answers"]
+
+    CSV --> INGEST
+    INGEST --> DB
+    INGEST --> JSON
+    DB --> CLEANSQL
+    CLEANSQL -->|"8 assertions ✓ PASS"| DB
+    DB --> VIZ
+    VIZ --> PLOTS
+    DB --> RAG
+    RAG --> VS
+    VS --> SERVER
+    VS --> QR
+    QS --> QR
+    QR --> ANS
+
+    style CSV fill:#4A90D9,stroke:#2C5F8A,color:#fff
+    style DB fill:#27AE60,stroke:#1E8449,color:#fff
+    style JSON fill:#27AE60,stroke:#1E8449,color:#fff
+    style VS fill:#8E44AD,stroke:#6C3483,color:#fff
+    style PLOTS fill:#E67E22,stroke:#CA6F1E,color:#fff
+    style ANS fill:#E74C3C,stroke:#CB4335,color:#fff
+    style QS fill:#4A90D9,stroke:#2C5F8A,color:#fff
+```
+
+| File | Role | Reads | Writes |
+|---|---|---|---|
+| `ingest.py` | Load & enrich | `data/kaggle_arxiv.csv` | `data/arxiv.db`, `data/papers_raw.json` |
+| `clean.sql` | Quality checks | `data/arxiv.db` | `data/arxiv.db` (in-place) |
+| `visualize.py` | 4 charts | `data/arxiv.db` | `plots/*.png` |
+| `rag_pipeline.py` | Chunk & embed | `data/arxiv.db` | `vector_store/` |
+| `server.py` | REST API | `vector_store/`, `data/arxiv.db` | _(responses)_ |
+| `query_runner.py` | Batch QA | `vector_store/`, `Test/questions.json` | `answers.json` |
 
 ---
 
@@ -13,23 +93,16 @@ runner using semantic retrieval + LLM generation.
 ├── ingest.py           # Step 1 — load, filter, build all DB tables
 ├── clean.sql           # Step 2 — SQL quality checks & cleaning
 ├── visualize.py        # Step 3 — generate all four plots
-├── rag_pipeline.py     # Step 4 — embed abstracts, build ChromaDB vector store, retrieve()
+├── rag_pipeline.py     # Step 4 — embed abstracts, build ChromaDB vector store
 ├── server.py           # Step 5 — FastAPI RAG server (4 endpoints)
-├── query_runner.py     # Step 6 — benchmark answer generation → answers.json
-├── ingest.ipynb        # Cell-by-cell verification notebook (mirrors ingest.py)
+├── query_runner.py     # Step 6 — benchmark answer generation
+├── ingest.ipynb        # Cell-by-cell verification notebook
 ├── answers.json        # Generated answers for all 22 benchmark questions
-├── data/
-│   ├── kaggle_arxiv.csv    # Source dataset (100,000 rows) — gitignored
-│   ├── papers_raw.json     # Exported raw records (JSON) — gitignored
-│   └── arxiv.db            # SQLite database (all tables) — gitignored
-├── vector_store/           # ChromaDB persistent store — gitignored (rebuild with rag_pipeline.py)
-├── plots/
-│   ├── 01_papers_per_category.png
-│   ├── 02_submission_trend_over_time.png
-│   ├── 03_publication_status_breakdown.png
-│   └── 04_abstract_length_distribution.png
+├── data/               # gitignored — regenerate with ingest.py
+├── vector_store/       # gitignored — regenerate with rag_pipeline.py
+├── plots/              # 4 publication-ready PNG charts
 └── Test/
-    └── questions.json      # 22 benchmark questions with grading criteria
+    └── questions.json  # 22 benchmark questions with grading criteria
 ```
 
 ---
@@ -40,80 +113,58 @@ runner using semantic retrieval + LLM generation.
 pip install pandas matplotlib numpy httpx chromadb python-dotenv fastapi uvicorn pydantic
 ```
 
-SQLite3 is part of the Python standard library — no extra install needed.
-
 Create a `.env` file in the project root:
 
 ```
 OPENROUTER=sk-or-v1-...
 ```
 
-The OpenRouter key is used for both embeddings (`sentence-transformers/all-minilm-l6-v2`)
-and LLM generation (`google/gemini-3.1-flash-lite-preview`).
+Used for embeddings (`sentence-transformers/all-minilm-l6-v2`) and LLM generation (`google/gemini-3.1-flash-lite-preview`) via OpenRouter.
 
 ---
 
-## How to Run (Step-by-Step)
-
-Run all commands from the project root.
-
----
-
-### Step 1 — Ingest & build the database
+## Quick Start
 
 ```bash
+# 1. Ingest
 python ingest.py
+
+# 2. Clean
+sqlite3 data/arxiv.db < clean.sql
+
+# 3. Visualise
+python visualize.py
+
+# 4. Build vector store (resume-capable)
+python rag_pipeline.py
+
+# 5. Start API server
+uvicorn server:app --host 0.0.0.0 --port 8000
+
+# 6. Generate benchmark answers
+python query_runner.py
 ```
 
-**What it does:**
+---
 
-1. Reads `data/kaggle_arxiv.csv` (100,000 rows, 13 columns).
-2. Filters rows to keep only papers with at least one of the five
-   supported categories: `cs.AI`, `cs.LG`, `cs.CL`, `stat.ML`, `cs.CV`.
-3. Builds six tables and writes them to `data/arxiv.db`:
+## Step-by-Step Details
+
+### Step 1 — Ingest
+
+`python ingest.py` reads `data/kaggle_arxiv.csv` (100k rows) and builds six tables in `data/arxiv.db`:
 
 | Table | Rows | Description |
 |---|---|---|
-| `raw_papers` | ~100k | Direct mapping from the CSV |
-| `papers` | ~100k | Enriched table with all derived fields |
-| `category_stats` | 5 | Aggregated totals & publication rate per category |
-| `yearly_trends` | varies | Paper counts per (year, category) pair |
-| `publication_status` | 10 | Published vs Preprint count per category |
-| `author_stats` | varies | One row per first author with activity summary |
+| `raw_papers` | ~100k | Direct mapping from CSV |
+| `papers` | ~100k | Enriched with all derived fields |
+| `category_stats` | 5 | Totals & publication rate per category |
+| `yearly_trends` | varies | Paper counts per (year, category) |
+| `publication_status` | 10 | Published vs Preprint per category |
+| `author_stats` | varies | One row per first author |
 
-4. Also writes `data/papers_raw.json` (JSON array, one object per paper).
+### Step 2 — Clean
 
-**Expected output (tail):**
-
-```
-Saved 100,000 rows to table 'raw_papers'
-Saved 100,000 rows to table 'papers'
-Saved 5 rows to table 'category_stats'
-...
-Ingestion complete.
-```
-
----
-
-### Step 2 — SQL quality checks & cleaning
-
-```bash
-sqlite3 data/arxiv.db < clean.sql
-```
-
-**What it does:**
-
-1. Verifies all five analytics tables exist.
-2. Removes rows from `papers` where:
-   - `title` is NULL or empty
-   - `arxiv_id` is duplicated (keeps lowest rowid)
-   - Any mandatory derived field is NULL or empty
-3. Rebuilds `category_stats`, `yearly_trends`, `publication_status`, and
-   `author_stats` from the cleaned `papers` table.
-4. Prints a final assertion report — every row must show `✓ PASS` with
-   `violations = 0`.
-
-**Expected assertion report:**
+`sqlite3 data/arxiv.db < clean.sql` runs 8 quality checks and prints:
 
 ```
 check_name                          violations  status
@@ -128,138 +179,60 @@ papers: null/empty subject_area     0           ✓ PASS
 papers: null/empty pub_status       0           ✓ PASS
 ```
 
----
+### Step 3 — Visualise
 
-### Step 3 — Generate visualisations
+Four PNGs saved to `plots/`:
 
-```bash
-python visualize.py
-```
+| Chart | Description |
+|---|---|
+| `01_papers_per_category.png` | Bar + dual-axis publication rate line |
+| `02_submission_trend_over_time.png` | Multi-line time series + YoY growth |
+| `03_publication_status_breakdown.png` | Absolute + 100% normalised stacked bars |
+| `04_abstract_length_distribution.png` | Box plots + per-category histograms |
 
-Reads directly from `data/arxiv.db` and saves four PNG files to `plots/`.
+### Step 4 — Build Vector Store
 
----
+`python rag_pipeline.py` chunks every abstract (200 words / 40 overlap), embeds via OpenRouter in batches of 256, and upserts into ChromaDB.
 
-### Step 4 — Build the vector store
+- **Resume-capable** — auto-detects missing categories, skips already-stored chunks
+- **~70k chunks** across all 5 categories on completion
 
-```bash
-python rag_pipeline.py
-```
-
-**What it does:**
-
-1. Loads all papers with non-empty abstracts from `data/arxiv.db`.
-2. Chunks each abstract into 200-word windows with 40-word overlap.
-3. Embeds chunks in batches of 256 via OpenRouter
-   (`sentence-transformers/all-minilm-l6-v2`, 384-dim vectors).
-4. Upserts into a ChromaDB persistent collection (`arxiv_papers`) stored in
-   `vector_store/` using cosine similarity.
-5. **Resume-capable** — auto-detects missing categories and skips chunks
-   already stored, so interrupted builds can be safely restarted.
-
----
-
-### Step 5 — Start the API server
+### Step 5 — API Server
 
 ```bash
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-The server auto-builds the vector store on startup if needed (resume mode).
-
-**Endpoints:**
-
-| Method | Path | Description |
+| Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness check — returns model name |
-| `GET` | `/stats` | DB summary: total papers, year range, counts by category |
-| `POST` | `/retrieve` | Semantic retrieval — returns ranked chunks, no LLM |
-| `POST` | `/query` | Full RAG: retrieve + LLM answer generation |
-
-**Example `/query` request:**
+| `GET` | `/health` | Liveness check |
+| `GET` | `/stats` | Paper counts, year range, per-category totals |
+| `POST` | `/retrieve` | Semantic chunk retrieval (no LLM) |
+| `POST` | `/query` | Full RAG: retrieve + LLM answer |
 
 ```bash
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "What regularization methods reduce overfitting?", "n_results": 5}'
+  -d '{"question": "What regularization methods reduce overfitting?", "category_filter": "cs.LG"}'
 ```
 
-Optional filters:
-
-```json
-{
-  "question": "...",
-  "category_filter": "cs.LG",
-  "year_filter": 2022,
-  "n_results": 5
-}
-```
-
----
-
-### Step 6 — Generate benchmark answers
+### Step 6 — Benchmark Answers
 
 ```bash
 python query_runner.py
 ```
 
-Reads `Test/questions.json` (22 benchmark questions), runs the full RAG
-pipeline for each (semantic retrieval from ChromaDB + LLM via OpenRouter),
-and writes results to `answers.json`.
-
-**LLM:** `google/gemini-3.1-flash-lite-preview` via OpenRouter  
-**Retrieval:** ChromaDB cosine similarity (`rag_pipeline.retrieve`)
-
-Each entry in `answers.json`:
-
-```json
-{
-  "question_id": "1",
-  "question": "...",
-  "answer": "...",
-  "sources": [
-    {
-      "arxiv_id": "...",
-      "title": "...",
-      "category": "cs.LG",
-      "year": 2022,
-      "pub_status": "Published",
-      "first_author": "...",
-      "distance": 0.123
-    }
-  ],
-  "model_used": "google/gemini-3.1-flash-lite-preview",
-  "category_filter": "cs.LG",
-  "year_filter": null
-}
-```
-
-Override defaults with flags:
-
-```bash
-python query_runner.py --questions Test/questions.json --out answers.json
-```
+Processes all 22 questions in `Test/questions.json` and writes `answers.json`.
+Each entry includes the answer, 5 source citations, model used, and applied filters.
 
 ---
 
 ## Database Schema
 
-### `raw_papers`
-| Column | Type | Notes |
-|---|---|---|
-| arxiv_id | TEXT | arXiv paper ID |
-| title | TEXT | Paper title |
-| abstract | TEXT | Full abstract |
-| authors | TEXT | Raw author string |
-| categories | TEXT | Full category string (space-separated) |
-| primary_category | TEXT | First token of categories |
-| submitted_date | TEXT | ISO date (YYYY-MM-DD) |
-| update_date | TEXT | ISO date (YYYY-MM-DD) |
-| journal_ref | TEXT | Journal reference (nullable) |
-| doi | TEXT | DOI (nullable) |
-| comment | TEXT | Author comment (nullable) |
+<details>
+<summary><strong>Click to expand full schema</strong></summary>
 
-### `papers`  *(primary analytics table)*
+### `papers` *(primary analytics table)*
 | Column | Type | Notes |
 |---|---|---|
 | arxiv_id | TEXT | arXiv paper ID |
@@ -268,97 +241,45 @@ python query_runner.py --questions Test/questions.json --out answers.json
 | authors | TEXT | Raw author string |
 | primary_category | TEXT | First listed category |
 | submitted | TEXT | ISO submission date |
-| abstract_word_count | INTEGER | Word count of abstract |
-| author_count | INTEGER | Number of authors (comma-split) |
-| first_author | TEXT | First name in author string |
-| submitted_year | INTEGER | Year extracted from submitted date |
-| subject_area | TEXT | Broad field mapped from category prefix |
-| pub_status | TEXT | `Published` (has DOI or journal ref) / `Preprint` |
+| abstract_word_count | INTEGER | `len(abstract.split())` |
+| author_count | INTEGER | Comma-separated author count |
+| first_author | TEXT | First token in authors string |
+| submitted_year | INTEGER | Year from submitted date |
+| subject_area | TEXT | `cs.*` → Computer Science, `stat.*` → Statistics |
+| pub_status | TEXT | `Published` if DOI or journal_ref present, else `Preprint` |
 
 ### `category_stats`
 | Column | Type | Notes |
 |---|---|---|
-| category | TEXT | primary_category value |
-| total_papers | INTEGER | Total papers in category |
+| category | TEXT | primary_category |
+| total_papers | INTEGER | Total papers |
 | published_count | INTEGER | Papers with pub_status = Published |
-| published_rate_pct | REAL | (published_count / total_papers) × 100 |
+| published_rate_pct | REAL | (published / total) × 100 |
 
 ### `yearly_trends`
-| Column | Type | Notes |
-|---|---|---|
-| year | INTEGER | submitted_year |
-| category | TEXT | primary_category |
-| paper_count | INTEGER | Papers for that (year, category) pair |
+| Column | Type |
+|---|---|
+| year | INTEGER |
+| category | TEXT |
+| paper_count | INTEGER |
 
 ### `publication_status`
-| Column | Type | Notes |
-|---|---|---|
-| pub_status | TEXT | `Published` or `Preprint` |
-| category | TEXT | primary_category |
-| paper_count | INTEGER | Papers for that (pub_status, category) pair |
+| Column | Type |
+|---|---|
+| pub_status | TEXT |
+| category | TEXT |
+| paper_count | INTEGER |
 
 ### `author_stats`
 | Column | Type | Notes |
 |---|---|---|
 | author | TEXT | first_author value |
 | paper_count | INTEGER | Papers as first author |
-| first_year | INTEGER | Earliest submitted_year |
-| last_year | INTEGER | Latest submitted_year |
-| top_category | TEXT | Category where author appears most as first author |
+| first_year | INTEGER | Earliest year |
+| last_year | INTEGER | Latest year |
+| top_category | TEXT | Most frequent category |
 
----
-
-## Visualisations
-
-### 01 — Papers per Category
-**File:** `plots/01_papers_per_category.png`
-- Bar chart of total papers per category
-- Dual axis: red line overlays the publication rate (%) per category
-- Bars annotated with exact counts
-
-### 02 — Submission Trend Over Time
-**File:** `plots/02_submission_trend_over_time.png`
-- Top panel: multi-line time series (one line per category, year on x-axis)
-- Peak year annotated on each line
-- Bottom panel: year-over-year % growth bar chart (green = growth, red = decline)
-
-### 03 — Publication Status Breakdown
-**File:** `plots/03_publication_status_breakdown.png`
-- Left panel: absolute stacked bar (Preprint + Published counts per category)
-- Right panel: 100% normalised stacked bar (publication rate comparison)
-- 50% reference line on the normalised panel
-- Categories sorted by publication rate (highest first)
-
-### 04 — Abstract Length Distribution
-**File:** `plots/04_abstract_length_distribution.png`
-- Top panel: horizontal box plots for all categories (IQR, whiskers, outlier dots)
-- Bottom row: individual histogram per category with median and mean lines
-
----
-
-## RAG Pipeline Architecture
-
-```
-kaggle_arxiv.csv
-      │
-      ▼
-  ingest.py ──────────────► data/arxiv.db (SQLite, 6 tables)
-                                  │
-                                  ▼
-                          rag_pipeline.py
-                          ├── chunk abstracts (200 words / 40 overlap)
-                          ├── embed via OpenRouter (all-minilm-l6-v2)
-                          └── upsert → vector_store/ (ChromaDB)
-                                  │
-                    ┌─────────────┴─────────────┐
-                    ▼                           ▼
-              server.py                  query_runner.py
-           (FastAPI REST API)          (batch answer generation)
-           POST /query                  reads Test/questions.json
-           POST /retrieve               writes answers.json
-           GET  /stats
-           GET  /health
-```
+</details>
 
 ---
 
@@ -371,27 +292,3 @@ kaggle_arxiv.csv
 | `cs.CL` | Computation & Language (NLP) |
 | `stat.ML` | Statistical Machine Learning |
 | `cs.CV` | Computer Vision |
-
----
-
-## Derived Field Logic
-
-| Field | Logic |
-|---|---|
-| `primary_category` | First whitespace-token in the `categories` string |
-| `abstract_word_count` | `len(abstract.split())` |
-| `author_count` | Count of comma-separated tokens in `authors` |
-| `first_author` | First comma-separated token in `authors` |
-| `submitted_year` | `.year` from parsed `submitted` datetime |
-| `subject_area` | Prefix map: `cs.*` → Computer Science, `stat.*` → Statistics |
-| `pub_status` | `Published` if `doi` or `journal_ref` is non-null/non-empty, else `Preprint` |
-
----
-
-## Verification Notebook
-
-`ingest.ipynb` mirrors `ingest.py` cell-by-cell for interactive inspection:
-
-```bash
-jupyter notebook ingest.ipynb
-```
