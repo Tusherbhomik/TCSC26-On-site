@@ -1,4 +1,4 @@
-# arXiv Paper Analysis — Submission
+# arXiv Paper Analysis
 
 A full data product over a sampled arXiv metadata dataset: ingestion pipeline,
 SQL quality checks, visualisations, a RAG API server, and a benchmark answer
@@ -6,10 +6,10 @@ runner using semantic retrieval + LLM generation.
 
 ---
 
-## Folder Structure
+## Repository Structure
 
 ```
-Submission/
+.
 ├── ingest.py           # Step 1 — load, filter, build all DB tables
 ├── clean.sql           # Step 2 — SQL quality checks & cleaning
 ├── visualize.py        # Step 3 — generate all four plots
@@ -42,7 +42,7 @@ pip install pandas matplotlib numpy httpx chromadb python-dotenv fastapi uvicorn
 
 SQLite3 is part of the Python standard library — no extra install needed.
 
-Create a `.env` file in the **project root** (one level above `Submission/`):
+Create a `.env` file in the project root:
 
 ```
 OPENROUTER=sk-or-v1-...
@@ -55,11 +55,7 @@ and LLM generation (`google/gemini-3.1-flash-lite-preview`).
 
 ## How to Run (Step-by-Step)
 
-All commands must be run from inside the `Submission/` directory:
-
-```bash
-cd Submission/
-```
+Run all commands from the project root.
 
 ---
 
@@ -154,15 +150,12 @@ python rag_pipeline.py
 
 1. Loads all papers with non-empty abstracts from `data/arxiv.db`.
 2. Chunks each abstract into 200-word windows with 40-word overlap.
-3. Embeds chunks in batches of 64 via OpenRouter
+3. Embeds chunks in batches of 256 via OpenRouter
    (`sentence-transformers/all-minilm-l6-v2`, 384-dim vectors).
 4. Upserts into a ChromaDB persistent collection (`arxiv_papers`) stored in
    `vector_store/` using cosine similarity.
-5. **Resume-capable** — skips chunks already stored, so interrupted builds
-   can be safely restarted.
-
-This step can take a while for the full dataset. The server and query runner
-will work with a partial build.
+5. **Resume-capable** — auto-detects missing categories and skips chunks
+   already stored, so interrupted builds can be safely restarted.
 
 ---
 
@@ -349,7 +342,7 @@ python query_runner.py --questions Test/questions.json --out answers.json
 kaggle_arxiv.csv
       │
       ▼
-  ingest.py ──────────────► arxiv.db (SQLite, 6 tables)
+  ingest.py ──────────────► data/arxiv.db (SQLite, 6 tables)
                                   │
                                   ▼
                           rag_pipeline.py

@@ -14,6 +14,7 @@ Requires env var:  OPENROUTER = sk-or-v1-...
 import os
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -24,9 +25,9 @@ from dotenv import load_dotenv
 
 # ── Environment ────────────────────────────────────────────────────────────────
 load_dotenv(Path(__file__).parent.parent / ".env")
-OPENROUTER_API_KEY  = os.getenv("OPENROUTER", "")
+OPENROUTER_API_KEY   = os.getenv("OPENROUTER", "")
 OPENROUTER_EMBED_URL = "https://openrouter.ai/api/v1/embeddings"
-EMBED_MODEL         = "sentence-transformers/all-minilm-l6-v2"
+EMBED_MODEL          = "sentence-transformers/all-minilm-l6-v2"
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR         = Path(__file__).parent
@@ -35,11 +36,14 @@ VECTOR_STORE_DIR = BASE_DIR / "vector_store"
 VECTOR_STORE_DIR.mkdir(exist_ok=True)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-COLLECTION_NAME = "arxiv_papers"
-CHUNK_SIZE      = 200    # words
-CHUNK_OVERLAP   = 40     # words
-EMBED_BATCH     = 64     # texts per API call (stay within rate limits)
-RETRY_DELAY     = 3.0    # seconds to wait after a rate-limit (429)
+COLLECTION_NAME    = "arxiv_papers"
+CHUNK_SIZE         = 200    # words
+CHUNK_OVERLAP      = 40     # words
+EMBED_BATCH        = 256    # texts per API call
+MAX_EMBED_WORKERS  = 1      # sequential — parallel calls trigger API auth blocks
+RETRY_DELAY        = 3.0    # seconds base wait after a rate-limit (429)
+
+ALL_CATEGORIES = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "stat.ML"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -49,6 +53,7 @@ def _embed(texts: list[str]) -> list[list[float]]:
     """
     Embed a batch of texts using the OpenRouter embeddings API.
     Returns a list of float vectors in the same order as input.
+    Thread-safe — each call uses its own httpx client.
     """
     if not OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER env var not set. Check your .env file.")
@@ -68,26 +73,26 @@ def _embed(texts: list[str]) -> list[list[float]]:
                     "input":           texts,
                     "encoding_format": "float",
                 },
-                timeout=60.0,
+                timeout=120.0,
             )
 
             if resp.status_code == 429:
-                wait = RETRY_DELAY * attempt
-                print(f"  Rate limited — waiting {wait}s (attempt {attempt})")
+                wait = min(RETRY_DELAY * attempt, 15.0)
+                print(f"  Rate limited — waiting {wait:.0f}s (attempt {attempt})")
                 time.sleep(wait)
                 continue
 
             resp.raise_for_status()
             data = resp.json()["data"]
-            # sort by index to guarantee ordering
             data.sort(key=lambda x: x["index"])
             return [item["embedding"] for item in data]
 
         except (httpx.HTTPStatusError, httpx.ReadError, httpx.ConnectError) as exc:
             if attempt == 4:
                 raise
-            print(f"  Network error ({type(exc).__name__}), retrying in {RETRY_DELAY * attempt}s ...")
-            time.sleep(RETRY_DELAY * attempt)
+            wait = min(RETRY_DELAY * attempt, 15.0)
+            print(f"  Network error ({type(exc).__name__}), retrying in {wait:.0f}s ...")
+            time.sleep(wait)
 
     raise RuntimeError("Embedding API failed after 4 attempts.")
 
@@ -129,13 +134,22 @@ def _get_collection(client: chromadb.PersistentClient):
 # ══════════════════════════════════════════════════════════════════════════════
 # Build / refresh vector store
 # ══════════════════════════════════════════════════════════════════════════════
-def build_vector_store(force: bool = False) -> None:
+def build_vector_store(
+    force: bool = False,
+    only_categories: Optional[list] = None,
+) -> None:
     """
-    Chunk all paper abstracts, embed via OpenRouter, and upsert into ChromaDB.
-    - force=False : resume mode — skips chunks already stored, adds new ones.
-    - force=True  : wipe collection and rebuild from scratch.
+    Chunk paper abstracts, embed via OpenRouter, and upsert into ChromaDB.
+
+    Parameters
+    ----------
+    force            : wipe collection and rebuild from scratch.
+    only_categories  : if set, only process papers from these categories
+                       (e.g. ['cs.CL', 'cs.CV', 'stat.ML']).
+                       Useful to fill in missing categories without
+                       re-processing what's already stored.
     """
-    client     = _get_client()
+    client = _get_client()
 
     if force:
         try:
@@ -146,21 +160,45 @@ def build_vector_store(force: bool = False) -> None:
 
     collection = _get_collection(client)
 
-    print("Reading papers from arxiv.db ...")
-    with sqlite3.connect(DB_PATH) as conn:
-        rows = conn.execute("""
+    # ── Load papers (optionally filtered by category) ─────────────────────────
+    if only_categories:
+        placeholders = ",".join("?" * len(only_categories))
+        query = f"""
             SELECT arxiv_id, title, abstract, primary_category,
                    submitted_year, pub_status, first_author
             FROM   papers
             WHERE  abstract IS NOT NULL AND TRIM(abstract) != ''
-        """).fetchall()
+              AND  primary_category IN ({placeholders})
+        """
+        params = only_categories
+        print(f"Reading papers for categories {only_categories} ...")
+    else:
+        query = """
+            SELECT arxiv_id, title, abstract, primary_category,
+                   submitted_year, pub_status, first_author
+            FROM   papers
+            WHERE  abstract IS NOT NULL AND TRIM(abstract) != ''
+        """
+        params = []
+        print("Reading all papers from arxiv.db ...")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(query, params).fetchall()
     print(f"  {len(rows):,} papers loaded.")
 
-    # ── Resume: skip chunks already stored ────────────────────────────────────
-    existing_ids = set(collection.get(include=[])["ids"])
+    # ── Resume: load existing IDs in pages (avoid segfault on large sets) ────
+    existing_ids: set = set()
+    _offset = 0
+    while True:
+        page = collection.get(include=[], limit=1000, offset=_offset)
+        if not page["ids"]:
+            break
+        existing_ids.update(page["ids"])
+        _offset += len(page["ids"])
     already = len(existing_ids)
-    print(f"  {already:,} chunks already stored — resuming from where we left off.")
+    print(f"  {already:,} chunks already stored — resuming.")
 
+    # ── Build list of new chunks ───────────────────────────────────────────────
     all_ids, all_docs, all_meta = [], [], []
     for arxiv_id, title, abstract, category, year, pub_status, first_author in rows:
         for idx, chunk in enumerate(chunk_text(abstract)):
@@ -170,39 +208,69 @@ def build_vector_store(force: bool = False) -> None:
             all_ids.append(chunk_id)
             all_docs.append(chunk)
             all_meta.append({
-                "arxiv_id":    arxiv_id     or "",
-                "title":       title        or "",
-                "category":    category     or "",
-                "year":        int(year)    if year else 0,
-                "pub_status":  pub_status   or "",
-                "first_author": first_author or "",
+                "arxiv_id":     arxiv_id      or "",
+                "title":        title         or "",
+                "category":     category      or "",
+                "year":         int(year)     if year else 0,
+                "pub_status":   pub_status    or "",
+                "first_author": first_author  or "",
+                "chunk_text":   chunk,
             })
 
     total = len(all_ids)
     if total == 0:
-        print(f"  Vector store is complete — {already:,} chunks, nothing to add.")
+        print(f"  Nothing new to add — {already:,} chunks already complete.")
         return
-    print(f"  {total:,} new chunks to embed.")
+    print(f"  {total:,} new chunks to embed (batch={EMBED_BATCH}, workers={MAX_EMBED_WORKERS}).")
 
-    # ── Embed + upsert in batches ──────────────────────────────────────────────
-    upserted = 0
+    # ── Split into batches ────────────────────────────────────────────────────
+    batches = []
     for start in range(0, total, EMBED_BATCH):
-        end       = min(start + EMBED_BATCH, total)
-        batch_ids  = all_ids[start:end]
-        batch_docs = all_docs[start:end]
-        batch_meta = all_meta[start:end]
+        end = min(start + EMBED_BATCH, total)
+        batches.append((
+            all_docs[start:end],
+            all_ids[start:end],
+            all_meta[start:end],
+        ))
 
-        vecs = _embed(batch_docs)
-        collection.upsert(
-            ids=batch_ids,
-            embeddings=vecs,
-            documents=batch_docs,
-            metadatas=batch_meta,
-        )
-        upserted += len(batch_ids)
-        print(f"  Progress: {upserted:,}/{total:,} chunks upserted ...", end="\r")
+    n_batches = len(batches)
+    print(f"  {n_batches} batches to process ...")
 
-    print(f"\nVector store built: {collection.count():,} chunks in '{COLLECTION_NAME}'.")
+    # ── Parallel embed + sequential upsert ───────────────────────────────────
+    # Embedding is I/O-bound (API call) → ThreadPoolExecutor speeds it up.
+    # ChromaDB upserts happen on the main thread to avoid write contention.
+    upserted   = 0
+    completed  = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_EMBED_WORKERS) as pool:
+        future_to_batch = {
+            pool.submit(_embed, docs): (docs, ids, metas)
+            for docs, ids, metas in batches
+        }
+
+        for fut in as_completed(future_to_batch):
+            _, ids, metas = future_to_batch[fut]
+            try:
+                vecs = fut.result()
+            except Exception as exc:
+                print(f"\n  Batch failed: {exc} — skipping {len(ids)} chunks.")
+                completed += 1
+                continue
+
+            collection.upsert(
+                ids=ids,
+                embeddings=vecs,
+                documents=[m["chunk_text"] for m in metas],
+                metadatas=[{k: v for k, v in m.items() if k != "chunk_text"} for m in metas],
+            )
+            upserted  += len(ids)
+            completed += 1
+            print(
+                f"  [{completed}/{n_batches}] {upserted:,}/{total:,} chunks upserted ...",
+                end="\r",
+            )
+
+    print(f"\nDone. Vector store now has {collection.count():,} chunks in '{COLLECTION_NAME}'.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -279,7 +347,23 @@ def retrieve(
 
 # ── CLI entry point ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    build_vector_store(force=False)
+    # Auto-detect which categories still have 0 chunks and build only those.
+    client     = _get_client()
+    collection = _get_collection(client)
+
+    missing = []
+    for cat in ALL_CATEGORIES:
+        r = collection.get(where={"category": {"$eq": cat}}, limit=1, include=[])
+        if not r["ids"]:
+            missing.append(cat)
+
+    if missing:
+        print(f"Missing categories: {missing}")
+        build_vector_store(only_categories=missing)
+    else:
+        print("All 5 categories present. Running full resume build to catch any gaps ...")
+        build_vector_store(force=False)
+
     print("\nSample retrieve('deep learning image classification'):")
     for r in retrieve("deep learning image classification", n_results=3):
         print(f"  [{r['distance']:.4f}] {r['arxiv_id']} — {r['title'][:60]}")
