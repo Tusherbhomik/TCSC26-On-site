@@ -24,7 +24,7 @@ from chromadb.config import Settings
 from dotenv import load_dotenv
 
 # ── Environment ────────────────────────────────────────────────────────────────
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent / ".env")
 OPENROUTER_API_KEY   = os.getenv("OPENROUTER", "")
 OPENROUTER_EMBED_URL = "https://openrouter.ai/api/v1/embeddings"
 EMBED_MODEL          = "sentence-transformers/all-minilm-l6-v2"
@@ -347,22 +347,10 @@ def retrieve(
 
 # ── CLI entry point ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Auto-detect which categories still have 0 chunks and build only those.
-    client     = _get_client()
-    collection = _get_collection(client)
-
-    missing = []
-    for cat in ALL_CATEGORIES:
-        r = collection.get(where={"category": {"$eq": cat}}, limit=1, include=[])
-        if not r["ids"]:
-            missing.append(cat)
-
-    if missing:
-        print(f"Missing categories: {missing}")
-        build_vector_store(only_categories=missing)
-    else:
-        print("All 5 categories present. Running full resume build to catch any gaps ...")
-        build_vector_store(force=False)
+    # Always do a full resume build — skips already-stored chunk IDs so it is
+    # safe to re-run at any time and only embeds what is genuinely missing.
+    print("Running full resume build (skips already-stored chunks) ...")
+    build_vector_store(force=False)
 
     print("\nSample retrieve('deep learning image classification'):")
     for r in retrieve("deep learning image classification", n_results=3):

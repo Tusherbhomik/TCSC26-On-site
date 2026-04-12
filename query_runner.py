@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from rag_pipeline import retrieve
 
 # ── Environment ────────────────────────────────────────────────────────────────
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent / ".env")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER", "")
 OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
 LLM_MODEL          = "google/gemini-3.1-flash-lite-preview"

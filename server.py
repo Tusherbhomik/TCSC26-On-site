@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from rag_pipeline import retrieve, build_vector_store, DB_PATH
 
 # ── Environment ────────────────────────────────────────────────────────────────
-load_dotenv(Path(__file__).parent.parent / ".env")   # repo-root .env
+load_dotenv(Path(__file__).parent / ".env")   # repo-root .env
 OPENROUTER_API_KEY = os.getenv("OPENROUTER") or os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
 LLM_MODEL          = "google/gemini-3.1-flash-lite-preview"   # fast, free-tier on OpenRouter

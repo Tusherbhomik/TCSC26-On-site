@@ -7,7 +7,7 @@
   <p align="center">
     <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
     <img src="https://img.shields.io/badge/SQLite-arxiv.db-003B57?style=for-the-badge&logo=sqlite&logoColor=white"/>
-    <img src="https://img.shields.io/badge/ChromaDB-vector store-FF6B6B?style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/ChromaDB-123k chunks-FF6B6B?style=for-the-badge"/>
     <img src="https://img.shields.io/badge/FastAPI-server-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
     <img src="https://img.shields.io/badge/OpenRouter-embeddings + LLM-6C5CE7?style=for-the-badge"/>
   </p>
@@ -195,7 +195,7 @@ Four PNGs saved to `plots/`:
 `python rag_pipeline.py` chunks every abstract (200 words / 40 overlap), embeds via OpenRouter in batches of 256, and upserts into ChromaDB.
 
 - **Resume-capable** — auto-detects missing categories, skips already-stored chunks
-- **~70k chunks** across all 5 categories on completion
+- **~123k chunks** across all 5 categories on completion
 
 ### Step 5 — API Server
 
