@@ -22,6 +22,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from rag_pipeline import retrieve, build_vector_store, DB_PATH
@@ -152,6 +153,12 @@ def _call_llm(question: str, context_chunks: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # Endpoints
 # ══════════════════════════════════════════════════════════════════════════════
+@app.get("/", include_in_schema=False)
+def ui():
+    """Serve the interactive Q&A frontend."""
+    return FileResponse(Path(__file__).parent / "ui.html", media_type="text/html")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model": LLM_MODEL}

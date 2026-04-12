@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>arXiv Research Assistant</title>
+  <style>
+    :root {
+      --bg:        #090912;
+      --surface:   #12121e;
+      --surface2:  #1a1a2e;
+      --border:    #ffffff14;
+      --primary:   #7c6df0;
+      --primary-g: #9b8cf5;
+      --cyan:      #00d2ff;
+      --coral:     #ff6b6b;
+      --green:     #43e97b;
+      --orange:    #fa8231;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --radius:    12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, #7c6df015 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, #00d2ff0d 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Header ── */
+    header {
+      position: relative;
+      z-index: 1;
+      padding: 2rem 2rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #12121e 0%, transparent 100%);
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .logo-icon {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--primary), var(--cyan));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+    }
+    .logo h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.3px; }
+    .logo p  { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+    .stats-bar {
+      display: flex;
+      gap: 1.5rem;
+      margin-left: auto;
+      flex-wrap: wrap;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 1.1rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--primary-g), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ── Main layout ── */
+    main {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* ── Query card ── */
+    .query-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .query-card label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 0.5rem;
+    }
+
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1rem;
+      padding: 0.85rem 1rem;
+      resize: vertical;
+      min-height: 80px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+    textarea:focus { border-color: var(--primary); }
+
+    .filters {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .filter-group label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    select, input[type="number"] {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      padding: 0.55rem 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    select { min-width: 120px; cursor: pointer; }
+    input[type="number"] { width: 90px; }
+    select:focus, input[type="number"]:focus { border-color: var(--primary); }
+
+    .submit-btn {
+      margin-left: auto;
+      padding: 0.6rem 1.8rem;
+      background: linear-gradient(135deg, var(--primary), #5a4bd6);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: opacity 0.2s, transform 0.15s;
+      white-space: nowrap;
+    }
+    .submit-btn:hover  { opacity: 0.9; transform: translateY(-1px); }
+    .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ── Loading dots ── */
+    .loading {
+      display: none;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 1.2rem 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .loading.active { display: flex; }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--primary);
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+      40%           { transform: scale(1);   opacity: 1; }
+    }
+
+    /* ── Answer section ── */
+    .answer-section { display: none; }
+    .answer-section.active { display: block; }
+
+    .answer-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .answer-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .answer-header span.model-tag {
+      margin-left: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.72rem;
+    }
+    .answer-text {
+      font-size: 1rem;
+      line-height: 1.7;
+      color: var(--text);
+    }
+
+    /* ── Sources ── */
+    .sources-header {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .sources-header .count {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.1rem 0.55rem;
+      font-size: 0.75rem;
+      color: var(--primary-g);
+    }
+
+    .sources-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .source-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      transition: border-color 0.2s, transform 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .source-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--primary), var(--cyan));
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .source-card:hover { border-color: #ffffff25; transform: translateY(-2px); }
+    .source-card:hover::before { opacity: 1; }
+
+    .source-card a {
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1.4;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    .source-card a:hover { color: var(--primary-g); }
+
+    .source-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.5rem;
+      align-items: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-category { background: #7c6df022; color: var(--primary-g); border: 1px solid #7c6df040; }
+    .badge-csai     { background: #7c6df022; color: #9b8cf5; border: 1px solid #7c6df040; }
+    .badge-cslg     { background: #00d2ff18; color: #00d2ff; border: 1px solid #00d2ff30; }
+    .badge-cscl     { background: #43e97b18; color: #43e97b; border: 1px solid #43e97b30; }
+    .badge-cscv     { background: #fa823118; color: #fa8231; border: 1px solid #fa823130; }
+    .badge-statml   { background: #ff6b6b18; color: #ff6b6b; border: 1px solid #ff6b6b30; }
+    .badge-published { background: #43e97b18; color: #43e97b; border: 1px solid #43e97b30; }
+    .badge-preprint  { background: #fa823118; color: #fa8231; border: 1px solid #fa823130; }
+
+    .source-info {
+      font-size: 0.75rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .distance-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .distance-track {
+      width: 48px;
+      height: 3px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .distance-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--green), var(--cyan));
+      border-radius: 2px;
+    }
+
+    /* ── Error ── */
+    .error-card {
+      background: #ff6b6b10;
+      border: 1px solid #ff6b6b30;
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      color: var(--coral);
+      font-size: 0.9rem;
+      display: none;
+    }
+    .error-card.active { display: block; }
+
+    /* ── History ── */
+    .history-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 0.5rem;
+      margin-top: 2rem;
+    }
+    .history-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 1rem;
+      margin-bottom: 0.4rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item:hover { color: var(--text); border-color: #ffffff25; }
+
+    @media (max-width: 600px) {
+      header { padding: 1.25rem 1rem; }
+      .stats-bar { gap: 1rem; }
+      .filters { gap: 0.5rem; }
+      .submit-btn { width: 100%; justify-content: center; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🔬</div>
+    <div>
+      <h1>arXiv Research Assistant</h1>
+      <p>Semantic search over 100k papers via RAG</p>
+    </div>
+  </div>
+  <div class="stats-bar" id="statsBar">
+    <div class="stat"><div class="stat-value" id="statPapers">—</div><div class="stat-label">Papers</div></div>
+    <div class="stat"><div class="stat-value">123k</div><div class="stat-label">Chunks</div></div>
+    <div class="stat"><div class="stat-value">5</div><div class="stat-label">Categories</div></div>
+  </div>
+</header>
+
+<main>
+  <div class="query-card">
+    <label>Ask a research question</label>
+    <textarea id="question" placeholder="e.g. What regularization methods are used to reduce overfitting in deep learning?"></textarea>
+
+    <div class="filters">
+      <div class="filter-group">
+        <label>Category</label>
+        <select id="category">
+          <option value="">All categories</option>
+          <option value="cs.AI">cs.AI — Artificial Intelligence</option>
+          <option value="cs.LG">cs.LG — Machine Learning</option>
+          <option value="cs.CL">cs.CL — Computation & Language</option>
+          <option value="cs.CV">cs.CV — Computer Vision</option>
+          <option value="stat.ML">stat.ML — Statistical ML</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Year</label>
+        <input type="number" id="year" placeholder="e.g. 2022" min="2000" max="2025" />
+      </div>
+      <div class="filter-group">
+        <label>Sources</label>
+        <select id="nResults">
+          <option value="3">3</option>
+          <option value="5" selected>5</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+        </select>
+      </div>
+      <button class="submit-btn" id="submitBtn" onclick="askQuestion()">
+        <span>Ask</span>
+        <span>→</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <span style="margin-left:0.5rem">Retrieving papers and generating answer…</span>
+  </div>
+
+  <div class="error-card" id="errorCard"></div>
+
+  <div class="answer-section" id="answerSection">
+    <div class="answer-card">
+      <div class="answer-header">
+        <span>Answer</span>
+        <span class="model-tag" id="modelTag"></span>
+      </div>
+      <div class="answer-text" id="answerText"></div>
+    </div>
+
+    <div class="sources-header">
+      <span>Sources</span>
+      <span class="count" id="sourceCount"></span>
+    </div>
+    <div class="sources-grid" id="sourcesGrid"></div>
+  </div>
+
+  <div id="historySection" style="display:none">
+    <div class="history-label">Recent questions</div>
+    <div id="historyList"></div>
+  </div>
+</main>
+
+<script>
+  const API = '';   // same origin — FastAPI server
+  const history = [];
+
+  const catClass = {
+    'cs.AI': 'badge-csai', 'cs.LG': 'badge-cslg',
+    'cs.CL': 'badge-cscl', 'cs.CV': 'badge-cscv', 'stat.ML': 'badge-statml'
+  };
+
+  // Load stats on page load
+  fetch(`${API}/stats`)
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('statPapers').textContent =
+        (d.total_papers / 1000).toFixed(0) + 'k';
+    })
+    .catch(() => {});
+
+  // Submit on Ctrl+Enter
+  document.getElementById('question').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askQuestion();
+  });
+
+  async function askQuestion() {
+    const question = document.getElementById('question').value.trim();
+    if (!question) return;
+
+    const category = document.getElementById('category').value || null;
+    const yearRaw  = document.getElementById('year').value;
+    const year     = yearRaw ? parseInt(yearRaw) : null;
+    const nResults = parseInt(document.getElementById('nResults').value);
+
+    setLoading(true);
+    clearError();
+    document.getElementById('answerSection').classList.remove('active');
+
+    try {
+      const resp = await fetch(`${API}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          category_filter: category,
+          year_filter: year,
+          n_results: nResults,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      renderAnswer(data);
+      addToHistory(question);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderAnswer(data) {
+    document.getElementById('answerText').textContent = data.answer;
+    document.getElementById('modelTag').textContent = data.model_used.split('/').pop();
+    document.getElementById('sourceCount').textContent = data.sources.length;
+
+    const grid = document.getElementById('sourcesGrid');
+    grid.innerHTML = '';
+
+    data.sources.forEach((src, i) => {
+      const similarity = Math.max(0, Math.min(1, 1 - src.distance));
+      const barWidth   = Math.round(similarity * 100);
+      const pubClass   = src.pub_status === 'Published' ? 'badge-published' : 'badge-preprint';
+      const catCls     = catClass[src.category] || 'badge-category';
+
+      grid.innerHTML += `
+        <div class="source-card">
+          <a href="https://arxiv.org/abs/${src.arxiv_id}" target="_blank" rel="noopener">
+            ${escHtml(src.title || src.arxiv_id)}
+          </a>
+          <div class="source-meta">
+            <span class="badge ${catCls}">${src.category}</span>
+            <span class="badge ${pubClass}">${src.pub_status}</span>
+            <span class="badge" style="background:#ffffff08;color:var(--muted);border:1px solid var(--border)">${src.year}</span>
+          </div>
+          <div class="source-info">
+            <span>${escHtml(src.first_author)}</span>
+            <div class="distance-bar">
+              <div class="distance-track"><div class="distance-fill" style="width:${barWidth}%"></div></div>
+              <span>${(similarity * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+        </div>`;
+    });
+
+    document.getElementById('answerSection').classList.add('active');
+  }
+
+  function addToHistory(q) {
+    if (history.includes(q)) return;
+    history.unshift(q);
+    if (history.length > 5) history.pop();
+    const listEl = document.getElementById('historyList');
+    document.getElementById('historySection').style.display = 'block';
+    listEl.innerHTML = history.map(h => `
+      <div class="history-item" onclick="loadHistory('${escAttr(h)}')">${escHtml(h)}</div>
+    `).join('');
+  }
+
+  function loadHistory(q) {
+    document.getElementById('question').value = q;
+    askQuestion();
+  }
+
+  function setLoading(on) {
+    document.getElementById('loading').classList.toggle('active', on);
+    document.getElementById('submitBtn').disabled = on;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorCard');
+    el.textContent = `Error: ${msg}`;
+    el.classList.add('active');
+  }
+
+  function clearError() {
+    document.getElementById('errorCard').classList.remove('active');
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escAttr(s) {
+    return String(s).replace(/'/g,"\\'");
+  }
+</script>
+</body>
+</html>
